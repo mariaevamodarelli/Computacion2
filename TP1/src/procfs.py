@@ -217,3 +217,33 @@ def map_segments(pid, proc_root="/proc"):
         groups[group] += size_kb
     return dict(groups)
 
+def fd_info(pid, proc_root="/proc"):
+    fd_dir = f"{proc_root}/{pid}/fd"
+    try:
+        names = sorted(os.listdir(fd_dir), key=lambda n: int(n))
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+        return None
+    items = []
+    for name in names:
+        path = f"{fd_dir}/{name}"
+        try:
+            target = os.readlink(path)
+        except OSError:
+            target = "(sin permiso o cerrado)"
+        items.append({"fd": name, "tipo": infer_fd_type(target), "destino": target})
+    return {"pid": pid, "fds": items, "cantidad": len(items)}
+
+
+def infer_fd_type(target):
+    lower = target.lower()
+    if lower.startswith("socket:"):
+        return "socket"
+    if lower.startswith("pipe:"):
+        return "pipe"
+    if lower.startswith("/dev/pts") or lower.startswith("/dev/tty"):
+        return "tty"
+    if lower.startswith("anon_inode"):
+        return "anon_inode"
+    if target.startswith("/"):
+        return "file"
+    return "otro"

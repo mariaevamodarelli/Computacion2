@@ -1,7 +1,7 @@
 import unittest
 import os
 import tempfile
-from src.procfs import map_segments, parse_stat_line
+from src.procfs import map_segments, parse_stat_line, infer_fd_type
 
 
 class ProcfsParsingTests(unittest.TestCase):
@@ -37,5 +37,9 @@ class ProcfsParsingTests(unittest.TestCase):
             self.assertEqual(segments["heap"], 8)
             self.assertEqual(segments["stack"], 4)
 
+    def test_infer_fd_type(self):
+        self.assertEqual(infer_fd_type("socket:[123]"), "socket")
+        self.assertEqual(infer_fd_type("pipe:[456]"), "pipe")
+        self.assertEqual(infer_fd_type("/tmp/archivo.txt"), "file")
 if __name__ == "__main__":
     unittest.main()
