@@ -1,6 +1,6 @@
 import os
 import time
-
+from collections import Counter
 
 try:
     import pwd
@@ -166,4 +166,54 @@ def process_summary(pid, previous_cpu, proc_root="/proc"):
         "threads": first_int(status.get("Threads", str(stat.get("num_threads", 0)))),
         "rss_kb": status_kb(status, "VmRSS"),
     }
+
+
+def memory_info(pid, proc_root="/proc"):
+    stat = read_stat(pid, proc_root)
+    status = read_status(pid, proc_root)
+    if not stat or not status:
+        return None
+    return {
+        "pid": pid,
+        "vmsize_kb": status_kb(status, "VmSize"),
+        "vmrss_kb": status_kb(status, "VmRSS"),
+        "vmdata_kb": status_kb(status, "VmData"),
+        "vmstk_kb": status_kb(status, "VmStk"),
+        "vmexe_kb": status_kb(status, "VmExe"),
+        "vmlib_kb": status_kb(status, "VmLib"),
+        "vmhwm_kb": status_kb(status, "VmHWM"),
+        "vmswap_kb": status_kb(status, "VmSwap"),
+        "minor_faults": stat.get("minflt", 0) + stat.get("cminflt", 0),
+        "major_faults": stat.get("majflt", 0) + stat.get("cmajflt", 0),
+        "segmentos": map_segments(pid, proc_root),
+    }
+
+
+def map_segments(pid, proc_root="/proc"):
+    groups = Counter()
+    for line in read_text(f"{proc_root}/{pid}/maps").splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        start_end = parts[0].split("-")
+        if len(start_end) != 2:
+            continue
+        try:
+            size_kb = (int(start_end[1], 16) - int(start_end[0], 16)) // 1024
+        except ValueError:
+            continue
+        perms = parts[1]
+        name = parts[-1] if len(parts) >= 6 else ""
+        if "[heap]" in name:
+            group = "heap"
+        elif "[stack]" in name:
+            group = "stack"
+        elif "x" in perms:
+            group = "text"
+        elif "w" in perms:
+            group = "data"
+        else:
+            group = "shared"
+        groups[group] += size_kb
+    return dict(groups)
 

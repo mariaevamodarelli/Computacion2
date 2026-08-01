@@ -1,6 +1,7 @@
 import unittest
-
-from src.procfs import parse_stat_line
+import os
+import tempfile
+from src.procfs import map_segments, parse_stat_line
 
 
 class ProcfsParsingTests(unittest.TestCase):
@@ -21,6 +22,20 @@ class ProcfsParsingTests(unittest.TestCase):
         self.assertEqual(parsed["priority"], 15)
         self.assertEqual(parsed["nice"], 16)
 
+    def test_map_segments_groups_basic_regions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc_dir = os.path.join(tmp, "100")
+            os.makedirs(proc_dir)
+            with open(os.path.join(proc_dir, "maps"), "w", encoding="utf-8") as f:
+                f.write("00400000-00401000 r-xp 00000000 00:00 0 /bin/demo\n")
+                f.write("00600000-00602000 rw-p 00000000 00:00 0 [heap]\n")
+                f.write("00700000-00701000 rw-p 00000000 00:00 0 [stack]\n")
+
+            segments = map_segments(100, tmp)
+
+            self.assertEqual(segments["text"], 4)
+            self.assertEqual(segments["heap"], 8)
+            self.assertEqual(segments["stack"], 4)
 
 if __name__ == "__main__":
     unittest.main()
