@@ -247,3 +247,28 @@ def infer_fd_type(target):
     if target.startswith("/"):
         return "file"
     return "otro"
+
+def thread_info(pid, previous_cpu, proc_root="/proc"):
+    task_dir = f"{proc_root}/{pid}/task"
+    try:
+        tids = sorted(int(name) for name in os.listdir(task_dir) if name.isdigit())
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+        return None
+    threads = []
+    for tid in tids:
+        stat = parse_stat_line(read_text(f"{task_dir}/{tid}/stat"))
+        status = {}
+        for line in read_text(f"{task_dir}/{tid}/status").splitlines():
+            if ":" in line:
+                key, value = line.split(":", 1)
+                status[key.strip()] = value.strip()
+        total = stat.get("utime", 0) + stat.get("stime", 0)
+        threads.append({
+            "tid": tid,
+            "nombre": read_text(f"{task_dir}/{tid}/comm", str(tid)).strip(),
+            "estado": stat.get("state", "?"),
+            "cpu": round(cpu_percent(total, previous_cpu, (pid, tid)), 1),
+            "voluntary_ctxt_switches": first_int(status.get("voluntary_ctxt_switches", "0")),
+            "nonvoluntary_ctxt_switches": first_int(status.get("nonvoluntary_ctxt_switches", "0")),
+        })
+    return {"pid": pid, "threads": threads, "cantidad": len(threads)}
