@@ -1,7 +1,8 @@
-import unittest
 import os
 import tempfile
-from src.procfs import map_segments, parse_stat_line, infer_fd_type
+import unittest
+
+from src.procfs import decode_signal_mask, infer_fd_type, map_segments, parse_stat_line
 
 
 class ProcfsParsingTests(unittest.TestCase):
@@ -22,6 +23,14 @@ class ProcfsParsingTests(unittest.TestCase):
         self.assertEqual(parsed["priority"], 15)
         self.assertEqual(parsed["nice"], 16)
 
+    def test_decode_signal_mask(self):
+        self.assertEqual(decode_signal_mask("0000000000000002"), ["SIGINT"])
+
+    def test_infer_fd_type(self):
+        self.assertEqual(infer_fd_type("socket:[123]"), "socket")
+        self.assertEqual(infer_fd_type("pipe:[456]"), "pipe")
+        self.assertEqual(infer_fd_type("/tmp/archivo.txt"), "file")
+
     def test_map_segments_groups_basic_regions(self):
         with tempfile.TemporaryDirectory() as tmp:
             proc_dir = os.path.join(tmp, "100")
@@ -37,9 +46,6 @@ class ProcfsParsingTests(unittest.TestCase):
             self.assertEqual(segments["heap"], 8)
             self.assertEqual(segments["stack"], 4)
 
-    def test_infer_fd_type(self):
-        self.assertEqual(infer_fd_type("socket:[123]"), "socket")
-        self.assertEqual(infer_fd_type("pipe:[456]"), "pipe")
-        self.assertEqual(infer_fd_type("/tmp/archivo.txt"), "file")
+
 if __name__ == "__main__":
     unittest.main()

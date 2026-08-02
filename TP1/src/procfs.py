@@ -272,3 +272,117 @@ def thread_info(pid, previous_cpu, proc_root="/proc"):
             "nonvoluntary_ctxt_switches": first_int(status.get("nonvoluntary_ctxt_switches", "0")),
         })
     return {"pid": pid, "threads": threads, "cantidad": len(threads)}
+
+
+def signal_info(pid, proc_root="/proc"):
+    status = read_status(pid, proc_root)
+    if not status:
+        return None
+    keys = ["SigBlk", "SigIgn", "SigCgt", "SigPnd", "ShdPnd"]
+    return {"pid": pid, **{key: decode_signal_mask(status.get(key, "0")) for key in keys}}
+
+
+def decode_signal_mask(mask_hex):
+    try:
+        mask = int(mask_hex, 16)
+    except (TypeError, ValueError):
+        return []
+    names = []
+    for number in range(1, 65):
+        if not (mask & (1 << (number - 1))):
+            continue
+        try:
+            names.append(signal.Signals(number).name)
+        except ValueError:
+            names.append(f"SIG{number}")
+    return names
+
+
+def scheduling_info(pid, proc_root="/proc"):
+    stat = read_stat(pid, proc_root)
+    status = read_status(pid, proc_root)
+    if not stat or not status:
+        return None
+    return {
+        "pid": pid,
+        "nice": stat.get("nice", 0),
+        "priority": stat.get("priority", 0),
+        "policy": POLICIES.get(stat.get("policy", 0), str(stat.get("policy", 0))),
+        "rt_priority": stat.get("rt_priority", 0),
+        "cpu_affinity": status.get("Cpus_allowed_list", "?"),
+        "voluntary_ctxt_switches": first_int(status.get("voluntary_ctxt_switches", "0")),
+        "nonvoluntary_ctxt_switches": first_int(status.get("nonvoluntary_ctxt_switches", "0")),
+        "utime": stat.get("utime", 0),
+        "stime": stat.get("stime", 0),
+        "sid": stat.get("session"),
+        "pgid": stat.get("pgrp"),
+    }
+
+
+def read_cpu_line(proc_root="/proc"):
+    for line in read_text(f"{proc_root}/stat").splitlines():
+        if line.startswith("cpu "):
+            values = [int(part) for part in line.split()[1:]]
+            return values
+    return []
+
+
+def cpu_global_percent(previous_cpu, proc_root="/proc"):
+    values = read_cpu_line(proc_root)
+    if not values:
+        return {}
+    old = previous_cpu.get("global", values)
+    previous_cpu["global"] = values
+    delta = [max(0, new - old_value) for new, old_value in zip(values, old)]
+    total = sum(delta) or 1
+    names = ["user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal"]
+    return {name: round(100.0 * delta[i] / total, 1) for i, name in enumerate(names) if i < len(delta)}
+
+
+def system_info(previous_cpu, summaries=None, proc_root="/proc"):
+    summaries = summaries or []
+    states = Counter()
+    total_threads = 0
+    for pid in list_pids(proc_root):
+        stat = read_stat(pid, proc_root)
+        if not stat:
+            continue
+        states[stat.get("state", "?")] += 1
+        total_threads += stat.get("num_threads", 0)
+
+    meminfo = {}
+    for line in read_text(f"{proc_root}/meminfo").splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            meminfo[key] = first_int(value)
+
+    btime = 0
+    for line in read_text(f"{proc_root}/stat").splitlines():
+        if line.startswith("btime "):
+            btime = first_int(line.replace("btime", "", 1))
+            break
+
+    uptime_parts = read_text(f"{proc_root}/uptime", "0 0").split()
+    uptime = float(uptime_parts[0]) if uptime_parts else 0.0
+    top_cpu = sorted(summaries, key=lambda p: p.get("cpu", 0), reverse=True)[:3]
+    top_mem = sorted(summaries, key=lambda p: p.get("rss_kb", 0), reverse=True)[:3]
+    return {
+        "cpu": cpu_global_percent(previous_cpu, proc_root),
+        "loadavg": read_text(f"{proc_root}/loadavg").strip(),
+        "memoria": {
+            "MemTotal": meminfo.get("MemTotal", 0),
+            "MemFree": meminfo.get("MemFree", 0),
+            "Buffers": meminfo.get("Buffers", 0),
+            "Cached": meminfo.get("Cached", 0),
+            "SwapTotal": meminfo.get("SwapTotal", 0),
+            "SwapFree": meminfo.get("SwapFree", 0),
+        },
+        "procesos_totales": sum(states.values()),
+        "procesos_por_estado": dict(states),
+        "threads_totales": total_threads,
+        "zombies": states.get("Z", 0),
+        "boot_time": btime,
+        "uptime": uptime,
+        "top_cpu": top_cpu,
+        "top_mem": top_mem,
+    }
