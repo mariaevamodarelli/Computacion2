@@ -1,0 +1,8 @@
+services:
+  monitor:
+    build: .
+    container_name: monitor-procesos
+    tty: true
+    stdin_open: true
+    environment:
+      - TERM=xterm-256color
