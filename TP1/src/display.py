@@ -86,7 +86,10 @@ def handle_signals(stdscr, snapshot, intervals, stop_event, controller, verbose_
             counters[2] += 1
             state.message = "Verbose ON" if verbose_value.value else "Verbose OFF"
         elif hasattr(signal, "SIGWINCH") and signum == signal.SIGWINCH:
-            curses.resize_term(0, 0)
+            try:
+                curses.resize_term(0, 0)
+            except curses.error:
+                pass
             stdscr.clear()
             state.message = "Pantalla redimensionada"
 
