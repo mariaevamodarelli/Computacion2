@@ -135,11 +135,14 @@ def handle_key(stdscr, state, intervals, stop_event):
 
 def prompt(stdscr, label):
     curses.echo()
-    h, _w = stdscr.getmaxyx()
-    stdscr.addstr(h - 1, 0, " " * 100)
-    stdscr.addstr(h - 1, 0, label)
+    h, w = stdscr.getmaxyx()
+    try:
+        stdscr.addstr(h - 1, 0, " " * max(1, w - 1))
+        stdscr.addstr(h - 1, 0, label[: max(1, w - 1)])
+    except curses.error:
+        pass
     stdscr.nodelay(False)
-    value = stdscr.getstr(h - 1, len(label), 40).decode("utf-8", errors="replace")
+    value = stdscr.getstr(h - 1, min(len(label), max(0, w - 1)), 40).decode("utf-8", errors="replace")
     stdscr.nodelay(True)
     curses.noecho()
     return value.strip()
