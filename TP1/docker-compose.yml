@@ -2,7 +2,12 @@ services:
   monitor:
     build: .
     container_name: monitor-procesos
+    pid: host
     tty: true
     stdin_open: true
     environment:
       - TERM=xterm-256color
+      - PROC_ROOT=/proc
+      - PASSWD_FILE=/host_etc/passwd
+    volumes:
+      - /etc/passwd:/host_etc/passwd:ro

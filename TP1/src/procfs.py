@@ -1,5 +1,5 @@
 import os
-import signal 
+import signal
 import time
 from collections import Counter
 
@@ -35,7 +35,12 @@ def read_text(path, default=""):
         return default
 
 
-def list_pids(proc_root="/proc"):
+def proc_root():
+    return os.environ.get("PROC_ROOT", "/proc")
+
+
+def list_pids(proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     try:
         return sorted(int(name) for name in os.listdir(proc_root) if name.isdigit())
     except OSError:
@@ -88,11 +93,13 @@ def int_or_zero(items, index):
     return 0 if value is None else value
 
 
-def read_stat(pid, proc_root="/proc"):
+def read_stat(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     return parse_stat_line(read_text(f"{proc_root}/{pid}/stat"))
 
 
-def read_status(pid, proc_root="/proc"):
+def read_status(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     status = {}
     for line in read_text(f"{proc_root}/{pid}/status").splitlines():
         if ":" not in line:
@@ -113,13 +120,24 @@ def status_kb(status, key):
 def parse_uid_gid(status):
     uid = first_int(status.get("Uid", "0"))
     gid = first_int(status.get("Gid", "0"))
-    try:
-        if pwd is None:
-            raise KeyError(uid)
-        username = pwd.getpwuid(uid).pw_name
-    except KeyError:
-        username = str(uid)
+    username = username_from_passwd_file(uid)
+    if username is None:
+        try:
+            if pwd is None:
+                raise KeyError(uid)
+            username = pwd.getpwuid(uid).pw_name
+        except KeyError:
+            username = str(uid)
     return uid, gid, username
+
+
+def username_from_passwd_file(uid):
+    passwd_file = os.environ.get("PASSWD_FILE", "/etc/passwd")
+    for line in read_text(passwd_file).splitlines():
+        parts = line.split(":")
+        if len(parts) >= 3 and parts[2].isdigit() and int(parts[2]) == uid:
+            return parts[0]
+    return None
 
 
 def first_int(value):
@@ -129,7 +147,8 @@ def first_int(value):
         return 0
 
 
-def read_cmdline(pid, proc_root="/proc"):
+def read_cmdline(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     raw = read_text(f"{proc_root}/{pid}/cmdline")
     cmd = raw.replace("\x00", " ").strip()
     if cmd:
@@ -148,7 +167,8 @@ def cpu_percent(total_ticks, previous, key, now=None):
     return max(0.0, 100.0 * (total_ticks - old_ticks) / CLK_TCK / elapsed)
 
 
-def process_summary(pid, previous_cpu, proc_root="/proc"):
+def process_summary(pid, previous_cpu, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     stat = read_stat(pid, proc_root)
     if not stat:
         return None
@@ -169,7 +189,8 @@ def process_summary(pid, previous_cpu, proc_root="/proc"):
     }
 
 
-def memory_info(pid, proc_root="/proc"):
+def memory_info(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     stat = read_stat(pid, proc_root)
     status = read_status(pid, proc_root)
     if not stat or not status:
@@ -184,13 +205,18 @@ def memory_info(pid, proc_root="/proc"):
         "vmlib_kb": status_kb(status, "VmLib"),
         "vmhwm_kb": status_kb(status, "VmHWM"),
         "vmswap_kb": status_kb(status, "VmSwap"),
+        "minflt": stat.get("minflt", 0),
+        "cminflt": stat.get("cminflt", 0),
+        "majflt": stat.get("majflt", 0),
+        "cmajflt": stat.get("cmajflt", 0),
         "minor_faults": stat.get("minflt", 0) + stat.get("cminflt", 0),
         "major_faults": stat.get("majflt", 0) + stat.get("cmajflt", 0),
         "segmentos": map_segments(pid, proc_root),
     }
 
 
-def map_segments(pid, proc_root="/proc"):
+def map_segments(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     groups = Counter()
     for line in read_text(f"{proc_root}/{pid}/maps").splitlines():
         parts = line.split()
@@ -218,7 +244,9 @@ def map_segments(pid, proc_root="/proc"):
         groups[group] += size_kb
     return dict(groups)
 
-def fd_info(pid, proc_root="/proc"):
+
+def fd_info(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     fd_dir = f"{proc_root}/{pid}/fd"
     try:
         names = sorted(os.listdir(fd_dir), key=lambda n: int(n))
@@ -249,7 +277,9 @@ def infer_fd_type(target):
         return "file"
     return "otro"
 
-def thread_info(pid, previous_cpu, proc_root="/proc"):
+
+def thread_info(pid, previous_cpu, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     task_dir = f"{proc_root}/{pid}/task"
     try:
         tids = sorted(int(name) for name in os.listdir(task_dir) if name.isdigit())
@@ -275,7 +305,8 @@ def thread_info(pid, previous_cpu, proc_root="/proc"):
     return {"pid": pid, "threads": threads, "cantidad": len(threads)}
 
 
-def signal_info(pid, proc_root="/proc"):
+def signal_info(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     status = read_status(pid, proc_root)
     if not status:
         return None
@@ -299,7 +330,8 @@ def decode_signal_mask(mask_hex):
     return names
 
 
-def scheduling_info(pid, proc_root="/proc"):
+def scheduling_info(pid, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     stat = read_stat(pid, proc_root)
     status = read_status(pid, proc_root)
     if not stat or not status:
@@ -320,7 +352,8 @@ def scheduling_info(pid, proc_root="/proc"):
     }
 
 
-def read_cpu_line(proc_root="/proc"):
+def read_cpu_line(proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     for line in read_text(f"{proc_root}/stat").splitlines():
         if line.startswith("cpu "):
             values = [int(part) for part in line.split()[1:]]
@@ -328,7 +361,8 @@ def read_cpu_line(proc_root="/proc"):
     return []
 
 
-def cpu_global_percent(previous_cpu, proc_root="/proc"):
+def cpu_global_percent(previous_cpu, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     values = read_cpu_line(proc_root)
     if not values:
         return {}
@@ -340,7 +374,8 @@ def cpu_global_percent(previous_cpu, proc_root="/proc"):
     return {name: round(100.0 * delta[i] / total, 1) for i, name in enumerate(names) if i < len(delta)}
 
 
-def system_info(previous_cpu, summaries=None, proc_root="/proc"):
+def system_info(previous_cpu, summaries=None, proc_root=None):
+    proc_root = proc_root or globals()["proc_root"]()
     summaries = summaries or []
     states = Counter()
     total_threads = 0

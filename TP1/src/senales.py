@@ -4,16 +4,11 @@ import signal
 import time
 
 
-MONITORED_SIGNALS = [
-    signal.SIGINT,
-    signal.SIGTERM,
-    signal.SIGHUP,
-    signal.SIGUSR1,
-    signal.SIGUSR2,
-]
+MONITORED_SIGNALS = [signal.SIGINT, signal.SIGTERM]
 
-if hasattr(signal, "SIGWINCH"):
-    MONITORED_SIGNALS.append(signal.SIGWINCH)
+for signal_name in ("SIGHUP", "SIGUSR1", "SIGUSR2", "SIGWINCH"):
+    if hasattr(signal, signal_name):
+        MONITORED_SIGNALS.append(getattr(signal, signal_name))
 
 
 class SignalController:

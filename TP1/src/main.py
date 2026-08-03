@@ -1,5 +1,6 @@
 import curses
 import multiprocessing as mp
+import os
 import sys
 import time
 
@@ -81,7 +82,8 @@ def stop_processes(processes, stop_event):
 
 
 def main():
-    mp.set_start_method("fork")
+    mp.set_start_method("fork", force=True)
+    ensure_tty()
     config = load_config()
     with mp.Manager() as manager:
         snapshot = manager.dict({
@@ -115,6 +117,19 @@ def main():
         finally:
             stop_processes(processes, stop_event)
             signal_controller.close()
+
+
+def ensure_tty():
+    """Intenta usar el TTY real cuando Docker no conecta stdin directo."""
+    if os.isatty(0):
+        return
+    try:
+        tty_fd = os.open("/dev/tty", os.O_RDWR)
+    except OSError:
+        return
+    os.dup2(tty_fd, 0)
+    os.dup2(tty_fd, 1)
+    os.close(tty_fd)
 
 
 if __name__ == "__main__":
