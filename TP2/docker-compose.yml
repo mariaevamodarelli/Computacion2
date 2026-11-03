@@ -1,0 +1,10 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      WORKERS: "4"
+      CAPACIDAD_COLA: "100"
+      PROCESOS_CPU: "2"
+    stop_grace_period: 60s
