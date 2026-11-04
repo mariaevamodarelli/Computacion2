@@ -209,6 +209,27 @@ class SistemaTests(unittest.IsolatedAsyncioTestCase):
                 await tarea
             self.assertTrue(cerrada.is_set())
 
+    async def test_worker_cancelado_se_reemplaza(self):
+        anterior = self.gestor.workers[0]
+        with self.assertLogs('app.manager', level='ERROR'):
+            anterior.cancel()
+            await asyncio.sleep(0.02)
+        self.assertIsNot(self.gestor.workers[0], anterior)
+        self.assertFalse(self.gestor.workers[0].done())
+        tarea = self.gestor.encolar(Esperar(tipo='esperar', segundos=0))
+        await self.drenar()
+        self.assertEqual(tarea.estado, Estado.COMPLETADA)
+
+    async def test_hash_en_bloques_conserva_resultado(self):
+        tarea = self.gestor.encolar(Hashear(
+            tipo='hashear', texto='cadena', iteraciones=50_001
+        ))
+        await self.drenar()
+        valor = b'cadena'
+        for _ in range(50_001):
+            valor = hashlib.sha256(valor).digest()
+        self.assertEqual(tarea.resultado['hash'], valor.hex())
+
 
 if __name__ == '__main__':
     unittest.main()

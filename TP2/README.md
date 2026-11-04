@@ -89,8 +89,8 @@ cliente HTTP compartido limita las conexiones a 40.
   importarla en los procesos hijos.
 - Una excepción ordinaria de una tarea se registra y la marca como fallida; el
   worker continúa atendiendo la cola. `task_done()` se ejecuta en `finally`.
-- El promedio de estadísticas contempla tareas terminadas, tanto completadas
-  como fallidas, y mide ejecución, sin contar espera en la cola.
+- El promedio de estadísticas contempla tareas terminadas, completadas,
+  fallidas y canceladas que llegaron a ejecutarse, y mide ejecución, sin contar espera en la cola.
 
 ## Cancelación, timeouts y apagado
 
@@ -113,19 +113,29 @@ Cancelar una tarea terminada devuelve su estado sin modificarla.
 
 Las descargas usan `TaskGroup`: ante cancelación o error inesperado se esperan
 todas las corrutinas hijas. El contexto del streaming cierra la respuesta.
-Para CPU, cancelar el await no detiene el proceso: se usa un evento compartido
-mediante `multiprocessing.Manager`. El hash lo consulta cada 4096 iteraciones.
-Al cancelar o vencer el timeout, se activa el evento y se espera la salida del
-cálculo. Por eso el timeout puede excederse ligeramente durante la limpieza.
-El hash sigue usando `run_in_executor` y procesos separados.
+Para CPU, cancelar el await no detiene un proceso. El cálculo se divide en
+bloques de hasta 50.000 iteraciones enviados con `run_in_executor`. Al cancelar
+se deja de enviar trabajo y se espera solo el bloque actual antes de liberar
+el worker. Los bytes intermedios conservan exactamente el mismo hash iterado.
+No se crean ni activan eventos compartidos desde el event loop.
 
 Uvicorn recibe SIGINT/SIGTERM y ejecuta el cierre del lifespan. Se dejan de
-aceptar tareas nuevas, se cancelan las pendientes y se concede hasta
-`ESPERA_APAGADO` segundos (10 por defecto) a las activas. Después se cancelan
-las restantes, se espera su limpieza y se cierran conexiones y procesos.
-Se escribe `datos/estado_<timestamp>.json` mediante archivo temporal y rename.
-Compose monta esa carpeta en el host para conservar los volcados. Al arrancar
-se informa por log si hay un volcado previo; no se restaura ni reejecuta.
+aceptar tareas nuevas y se cancelan las pendientes. Las activas tienen hasta
+`ESPERA_APAGADO` segundos (10 por defecto) para terminar; luego se cancelan y
+se concede hasta 2 segundos a su limpieza, más hasta 2 segundos a los workers.
+Se marcan los estados restantes como cancelados y se escribe
+`datos/estado_<timestamp>.json` antes de cerrar los recursos. El cliente HTTP
+tiene un límite de cierre de 2 segundos; el executor se cierra sin volver a
+esperar indefinidamente al cálculo completo. Sus trabajos son bloques cortos.
+Compose conserva los volcados en la carpeta del host. Al arrancar se informa
+por log si hay un volcado previo; no se restaura ni reejecuta.
+
+Las excepciones ordinarias de una tarea quedan capturadas y no matan al worker.
+Si una excepción escapa de la corrutina del propio worker o esta se cancela
+inesperadamente, un callback registra su terminación y crea un reemplazo.
+Durante el apagado se desactiva esa reposición. Esto repone capacidad, pero
+no reintenta automáticamente la tarea fallida ni reconstruye un pool de
+procesos roto: esas limitaciones se deben tener presentes.
 
 ## Mediciones reproducibles
 
@@ -153,43 +163,39 @@ están en [mediciones/INFORME.md](mediciones/INFORME.md).
 Los datos incluidos se obtuvieron ejecutando Python en este entorno de trabajo,
 no dentro de Docker ni en la terminal del estudiante. Son mediciones reales de
 HTTP local con una demora controlada; no describen la velocidad de Internet.
-Si se repite el experimento en otra máquina, hay que actualizar resultados e
-interpretación juntos: el JSON se sobrescribe, el texto del informe no.
+Al repetir el experimento, se actualizan automáticamente el JSON, el informe y
+las tablas del README. Para regenerar los textos: python -m benchmarks.informe.
 
 ### Resultados incluidos
 
-Configuración: 4 workers, 2 procesos CPU y cola de 100. HTTP local real;
-respuestas de 1024 bytes con 100 ms de demora controlada. Medianas de tres
-repeticiones para I/O y CPU; una muestra por tamaño de lote para el pool.
+Muestras de la implementación final con bloques de hash.
 
 | Experimento | Resultado |
-|---|---|
-| 20 descargas secuenciales | 2.0672 s |
-| 20 descargas concurrentes | 0.1233 s |
+|---|---:|
+| 20 descargas secuenciales (mediana) | 2.0614 s |
+| 20 descargas concurrentes (mediana) | 0.1230 s |
 | Speedup (cociente de medianas) | 16.76× |
-| GET durante hash sin executor | 710.601 ms |
-| GET durante hash con executor | 0.996 ms |
+| GET durante hash sin executor (mediana) | 633.988 ms |
+| GET durante hash con executor (mediana) | 0.966 ms |
 
-El hash usa 3.000.000 iteraciones de SHA-256. El executor mantiene disponible
-el event loop; el beneficio medido es la respuesta de la API, no acelerar el
-hash aislado. En I/O, las esperas de red se superponen.
+Tres repeticiones de I/O y CPU. HTTP local real con respuestas de 1024 bytes y
+100 ms de espera. El hash usa 3.000.000 iteraciones SHA-256. El executor mejora
+la respuesta de la API, no necesariamente el tiempo del hash.
 
-| Tareas enviadas | Tiempo de lote (s) | Latencia p95 (s) | Rechazadas |
-|---:|---:|---:|---:|
-| 1 | 0.161 | 0.151 | 0 |
-| 4 | 0.164 | 0.152 | 0 |
-| 8 | 0.315 | 0.299 | 0 |
-| 16 | 0.613 | 0.594 | 0 |
-| 32 | 1.234 | 1.180 | 0 |
-| 64 | 2.444 | 2.352 | 0 |
-| 128 | 3.955 | 3.697 | 24 |
+| Enviadas | Aceptadas | Rechazadas (503) | Lote (s) | Mediana (s) | p95 (s) | Tareas/s |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 0 | 0.159 | 0.151 | 0.151 | 6.31 |
+| 4 | 4 | 0 | 0.158 | 0.151 | 0.151 | 25.28 |
+| 8 | 8 | 0 | 0.312 | 0.225 | 0.299 | 25.65 |
+| 16 | 16 | 0 | 0.624 | 0.372 | 0.594 | 25.66 |
+| 32 | 32 | 0 | 1.233 | 0.663 | 1.178 | 25.95 |
+| 64 | 64 | 0 | 2.436 | 1.249 | 2.346 | 26.27 |
+| 128 | 104 | 24 | 3.960 | 1.998 | 3.694 | 26.26 |
 
-Las tareas de este experimento esperan 150 ms. Por encima de cuatro tareas
-simultáneas aparece cola; el rendimiento se aproxima a `4 / 0,15 ≈ 26,67`
-tareas/s y la latencia crece. El lote de 128 llena la capacidad instantánea
-de 4 activas + 100 pendientes. Este techo corresponde a esperas, no mide el
-máximo de CPU o de red. El informe vinculado conserva cada muestra y explica
-la sincronización del experimento con y sin executor.
+Con cuatro workers y esperas de 150 ms, el techo esperado es 4 / 0,15 ≈ 26,67
+tareas/s. Al superar cuatro tareas aparece espera en cola. La capacidad
+instantánea es 4 activas + 100 pendientes; no es un máximo universal por lote,
+porque pueden terminar tareas mientras llegan otras.
 
 ## Conceptos de la materia aplicados
 
@@ -208,16 +214,16 @@ la sincronización del experimento con y sin executor.
   productor–consumidor; `TaskGroup` administra las descargas hijas;
   `wait_for` combina límite temporal con cancelación y limpieza.
 - **Clase 22, concurrent.futures:** `ProcessPoolExecutor` aísla el cálculo
-  intensivo y `run_in_executor` lo integra con el event loop. El evento
-  compartido permite la detención cooperativa.
+  intensivo y `run_in_executor` lo integra con el event loop. Los bloques
+  cortos permiten detener el envío de trabajo al cancelar.
 - **Bloque 0, context managers:** `lifespan`, `async with client.stream(...)`
   y `try/finally` definen cuándo abrir y cerrar recursos.
 
 No hace falta un lock para registrar una tarea porque no hay `await` entre la
 inserción en la cola y su registro. Esto no vuelve atómicas todas las funciones
 async: cada `await` permite que otra corrutina avance. El estado de tareas se
-modifica en el hilo del event loop; los procesos solo calculan y consultan el
-evento compartido.
+modifica en el hilo del event loop; los procesos calculan bloques de hash y devuelven
+los bytes intermedios.
 
 Con 10.000 solicitudes de golpe, una vez ocupados los workers y los 100 lugares
 de la cola, el POST responde `503`. Eso evita una cola ilimitada, pero no limita
@@ -227,8 +233,9 @@ estadísticas recorren ese historial, lo cual también aumenta su costo.
 ## Limitaciones actuales
 
 El historial crece en memoria y no se restaura al reiniciar. No hay autenticación.
-El cierre tiene un tiempo de gracia limitado, seguido por limpieza cooperativa;
-no garantiza un límite absoluto si un proceso del sistema deja de responder.
+La espera de tareas y workers durante el cierre está acotada. Un bloqueo del
+sistema operativo o del disco puede impedir terminar un proceso o escribir el
+volcado: no hay una garantía absoluta frente a fallos del sistema.
 Las URLs son aportadas por el cliente: esta versión se debe usar en un entorno
 local controlado, no como servicio público. Las dependencias tienen rangos de
 versiones y aún no hay archivo de bloqueo reproducible.
@@ -245,5 +252,27 @@ Las pruebas cubren encolado inmediato, concurrencia, recuperación tras errores,
 cola llena, descargas simuladas, hash en proceso real, cancelación pendiente y
 en ejecución, cancelación y timeout de CPU, cierre de streaming, timeout de
 espera, apagado con cancelación y volcado JSON, y detección del volcado previo.
-Las 11 pruebas pasaron en esta copia. La configuración de Compose se validó;
-no se ejecutó la imagen Docker por falta de acceso al daemon en este entorno.
+Las 13 pruebas pasaron en esta copia. La configuración de Compose se validó.
+El usuario también comprobó el arranque del contenedor y la respuesta HTTP de
+`GET /estadisticas` desde el host.
+
+## Lo que aprendí
+
+Este trabajo me ayudó a entender la diferencia entre concurrencia y paralelismo.
+En las descargas, `asyncio` permite aprovechar el tiempo de espera para avanzar
+con otras operaciones. En cambio, el cálculo de hashes necesita ejecutarse
+fuera del hilo del event loop para que la API siga respondiendo. Las mediciones
+permitieron observar esa diferencia con números.
+
+Otro aprendizaje fue que cancelar una tarea requiere cuidar los recursos que
+está utilizando. En las descargas hay que cerrar las respuestas y detener las
+corrutinas hijas. En las tareas de CPU, cancelar el `await` no detiene
+automáticamente el proceso. Dividir el hash en bloques permite dejar de enviar
+trabajo y esperar únicamente el bloque en curso.
+
+También comprendí la importancia de medir y probar el comportamiento del
+sistema. Tener más tareas pendientes no significa ejecutar más tareas al mismo
+tiempo: al ocuparse los workers, aumenta la espera en la cola. Las pruebas de
+cancelación, los timeouts y el apagado ordenado permitieron revisar situaciones
+que no aparecen cuando solamente se comprueba que una tarea termina
+correctamente.

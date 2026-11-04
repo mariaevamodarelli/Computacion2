@@ -11,7 +11,7 @@ from app.models import Hashear
 from app.tasks import ejecutar, hash_iterado
 
 
-async def ejecutar_medido(solicitud, client, executor, detener=None):
+async def ejecutar_medido(solicitud, client, executor):
     if isinstance(solicitud, Hashear):
         # El cliente está en otro proceso: detecta este marcador aun cuando
         # el event loop del servidor se encuentra bloqueado por el hash.
@@ -19,7 +19,7 @@ async def ejecutar_medido(solicitud, client, executor, detener=None):
         if os.getenv('CPU_DIRECTA') == '1':
             return {'hash': hash_iterado(solicitud.texto, solicitud.iteraciones),
                     'iteraciones': solicitud.iteraciones}
-    return await ejecutar(solicitud, client, executor, detener)
+    return await ejecutar(solicitud, client, executor)
 
 
 manager.ejecutar = ejecutar_medido

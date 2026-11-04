@@ -1,128 +1,106 @@
 # Mediciones — TP2
 
-## Entorno y alcance
+## Entorno
 
-Ejecución iniciada el 2026-11-03T23:15:05.027653+00:00. Python 3.12.3,
-Linux-7.0.0-31-generic-x86_64-with-glibc2.39. CPU lógicas visibles: 16
-(no implica núcleos dedicados ni cuotas garantizadas).
-FastAPI 0.162.0, HTTPX 0.28.1,
-Pydantic 2.14.2.
+Inicio UTC: 2026-11-04T02:41:58.743087+00:00. Python 3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0].
+Plataforma: Linux-7.0.0-31-generic-x86_64-with-glibc2.39. CPU visibles: 16
+(no implica CPU dedicadas). FastAPI 0.162.0, HTTPX 0.28.1,
+Pydantic 2.14.2. Cuatro workers, dos procesos CPU y cola de 100.
+Se midió fuera de Docker, con TCP de loopback, sin sitios externos.
 
-Datos obtenidos por ejecución real desde el entorno de desarrollo, fuera de
-Docker. La red es TCP de loopback. Se usan 4 workers, 2 procesos de CPU y una
-cola de capacidad 100. Las muestras originales están en `resultados.json`.
+Muestras de la implementación final con bloques de hash.
 
-El cliente de medición corre en un proceso distinto al servidor, por lo que
-puede medir una respuesta lenta incluso si el event loop del servidor está
-bloqueado. Se usan puertos libres y carpetas temporales para no interferir con
-la API normal. Se repitió la corrida final sin ejecutar las pruebas en paralelo.
-No se mide un entorno de producción ni se presupone que otros equipos tengan
-los mismos resultados.
+## 1. Veinte descargas secuenciales y concurrentes
 
-## 1. Veinte descargas secuenciales frente a concurrentes
-
-Se descargan 20 respuestas HTTP de 1024 bytes. Cada respuesta demora 100 ms
-mediante `asyncio.sleep` en el servidor de prueba. El tiempo incluye la red
-local, la espera y la lectura completa del cuerpo. Se comprueba HTTP 200,
-tamaño y ausencia de errores. El cliente HTTP se reutiliza.
-
-La versión secuencial usa un `for` con `await descargar_url`; la concurrente
-invoca `ejecutar(Descargar(...))`, que usa `TaskGroup`. Se llaman las mismas
-funciones de descarga de la aplicación, sin medir la espera de su cola.
-Se ejecutan tres pares, siempre secuencial y luego concurrente.
+Se descargan respuestas de 1024 bytes con demora de 100 ms. Se comprueba código
+200, tamaño y ausencia de errores. Se reutiliza el cliente. La versión secuencial
+usa un for con await descargar_url; la concurrente usa ejecutar(Descargar(...)).
+Son las funciones reales de la aplicación, sin espera en la cola. Cada par se
+mide primero secuencial y luego concurrente.
 
 | Repetición | Secuencial (s) | Concurrente (s) | Speedup |
 |---|---:|---:|---:|
-| 1 | 2.0651 | 0.1204 | 17.16× |
-| 2 | 2.0672 | 0.1233 | 16.76× |
-| 3 | 2.0700 | 0.1271 | 16.29× |
+| 1 | 2.0601 | 0.1183 | 17.42× |
+| 2 | 2.0614 | 0.1266 | 16.28× |
+| 3 | 2.0667 | 0.1230 | 16.80× |
 
-Mediana secuencial: **2.0672 s**. Mediana concurrente: **0.1233 s**.
-Cociente de medianas: **16.76×**. El speedup de cada fila se calcula
-como tiempo secuencial dividido por tiempo concurrente.
+El cociente de medianas es 16.76×. Las esperas se superponen y el tiempo
+se acerca al de una respuesta más apertura de conexiones y planificación.
+Esto no acelera CPU ni describe el ancho de banda de Internet.
 
-Las esperas se superponen: el tiempo concurrente se acerca al de una respuesta,
-con el costo adicional de abrir conexiones y programar corrutinas. La mejora
-no representa una aceleración del cálculo ni una medición del ancho de banda
-de Internet. La demora controlada domina este caso de I/O.
+## 2. Hash y respuesta del event loop
 
-## 2. Event loop bloqueado por CPU
+Se encola un hash de 3.000.000 iteraciones. Un marcador escrito justo antes del
+cálculo permite al cliente externo enviar GET /tareas durante el trabajo. El
+cliente corre en otro proceso y puede medir aunque el servidor esté bloqueado.
+El pool se calienta antes de medir. La variante síncrona solo existe en el
+servidor de benchmarks; la API normal siempre usa el executor. Se comprueba
+que los hashes terminen completados.
 
-Cada hash aplica SHA-256 3.000.000 de veces. Un servidor experimental usa la
-misma API y el mismo gestor, pero reemplaza la ejecución de `hashear` por una
-llamada síncrona directa. La otra variante usa el executor de la aplicación.
-El pool se calienta con una tarea mínima antes de medir.
-
-El servidor crea un marcador justo antes del cálculo; el cliente externo lo
-detecta y envía `GET /tareas`. Así el GET se envía durante el trabajo, sin
-necesitar que el servidor responda primero a una consulta de estado. El modo
-que bloquea está confinado al módulo de benchmarks y no se activa al ejecutar
-`uvicorn app.main:app`. Se verificó que todos los hashes terminaran completados.
-
-| Modo | Repetición | Ejecución del hash (s) | Latencia GET (ms) |
+| Modo | Repetición | Hash (s) | GET (ms) |
 |---|---:|---:|---:|
-| Sin executor | 1 | 0.7096 | 708.941 |
-| Sin executor | 2 | 0.7120 | 710.601 |
-| Sin executor | 3 | 0.7142 | 713.482 |
-| Con executor | 1 | 0.7662 | 1.328 |
-| Con executor | 2 | 0.7447 | 0.945 |
-| Con executor | 3 | 0.7546 | 0.996 |
+| Sin executor | 1 | 0.6314 | 632.758 |
+| Sin executor | 2 | 0.6466 | 647.735 |
+| Sin executor | 3 | 0.6326 | 633.988 |
+| Con executor | 1 | 0.8072 | 1.467 |
+| Con executor | 2 | 0.7383 | 0.953 |
+| Con executor | 3 | 0.7123 | 0.966 |
 
-La mediana del GET pasó de **710.601 ms** sin executor a
-**0.996 ms** con executor (cociente: **713.6×**).
+Sin executor, el bucle ocupa el hilo hasta terminar e impide atender el GET.
+Con executor, otro proceso calcula y el event loop puede atender conexiones.
+La comparación mide capacidad de respuesta, no aceleración del hash aislado.
 
-Sin executor el hilo no vuelve al event loop hasta terminar el bucle, por eso
-el GET espera casi todo ese tiempo. Con executor el cálculo ocurre en otro
-proceso y el servidor sigue atendiendo conexiones. Esto mide capacidad de
-respuesta: no demuestra que calcular un hash aislado sea más rápido con pool.
-La creación de eventos, la comunicación entre procesos y la planificación
-agregan costos.
+## 3. Saturación del pool
 
-## 3. Techo del pool y espera en cola
+Se envían lotes concurrentes de tareas esperar de 150 ms por los endpoints
+reales. Cada lote termina antes del siguiente. Su tiempo incluye envío y
+consultas hasta detectar el final. La latencia por tarea va de creada a
+terminada e incluye cola; duracion_segundos solo mide ejecución. El p95 usa
+rango más cercano. Hay una muestra por tamaño de lote.
 
-Se envían lotes de tareas `esperar` de 150 ms mediante POST concurrentes. Se
-usan los endpoints reales de la API. Cada lote termina antes de comenzar el
-siguiente. El tiempo de lote incluye envío y consultas hasta detectar el final.
-La latencia por tarea se calcula desde `creada` hasta `terminada`: incluye cola
-y ejecución; el campo `duracion_segundos` de la API solo mide ejecución.
+### Resultados incluidos
 
-El p95 usa el método de rango más cercano sobre las tareas aceptadas. Se hace
-una muestra por tamaño de lote: sirve para observar el límite, no para estimar
-un percentil estable de producción.
+Muestras de la implementación final con bloques de hash.
+
+| Experimento | Resultado |
+|---|---:|
+| 20 descargas secuenciales (mediana) | 2.0614 s |
+| 20 descargas concurrentes (mediana) | 0.1230 s |
+| Speedup (cociente de medianas) | 16.76× |
+| GET durante hash sin executor (mediana) | 633.988 ms |
+| GET durante hash con executor (mediana) | 0.966 ms |
+
+Tres repeticiones de I/O y CPU. HTTP local real con respuestas de 1024 bytes y
+100 ms de espera. El hash usa 3.000.000 iteraciones SHA-256. El executor mejora
+la respuesta de la API, no necesariamente el tiempo del hash.
 
 | Enviadas | Aceptadas | Rechazadas (503) | Lote (s) | Mediana (s) | p95 (s) | Tareas/s |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 1 | 0 | 0.161 | 0.151 | 0.151 | 6.20 |
-| 4 | 4 | 0 | 0.164 | 0.152 | 0.152 | 24.33 |
-| 8 | 8 | 0 | 0.315 | 0.224 | 0.299 | 25.38 |
-| 16 | 16 | 0 | 0.613 | 0.372 | 0.594 | 26.09 |
-| 32 | 32 | 0 | 1.234 | 0.664 | 1.180 | 25.93 |
-| 64 | 64 | 0 | 2.444 | 1.251 | 2.352 | 26.18 |
-| 128 | 104 | 24 | 3.955 | 1.998 | 3.697 | 26.30 |
+| 1 | 1 | 0 | 0.159 | 0.151 | 0.151 | 6.31 |
+| 4 | 4 | 0 | 0.158 | 0.151 | 0.151 | 25.28 |
+| 8 | 8 | 0 | 0.312 | 0.225 | 0.299 | 25.65 |
+| 16 | 16 | 0 | 0.624 | 0.372 | 0.594 | 25.66 |
+| 32 | 32 | 0 | 1.233 | 0.663 | 1.178 | 25.95 |
+| 64 | 64 | 0 | 2.436 | 1.249 | 2.346 | 26.27 |
+| 128 | 104 | 24 | 3.960 | 1.998 | 3.694 | 26.26 |
 
-Con cuatro tareas, cada una puede comenzar sin esperar un worker. Al superar
-cuatro, aparece espera en cola: ya se ve en el lote de ocho. El rendimiento se
-aproxima al techo teórico de este caso, `4 / 0,15 ≈ 26,67 tareas/s`, mientras
-la latencia crece por tandas. Agregar solicitudes no agrega workers.
+Con cuatro workers y esperas de 150 ms, el techo esperado es 4 / 0,15 ≈ 26,67
+tareas/s. Al superar cuatro tareas aparece espera en cola. La capacidad
+instantánea es 4 activas + 100 pendientes; no es un máximo universal por lote,
+porque pueden terminar tareas mientras llegan otras.
 
-En el lote de 128 se aceptaron 104 y se rechazaron
-24. El techo instantáneo es cuatro tareas ejecutando
-más cien pendientes. No es un máximo universal de solicitudes por lote: si
-algunas terminan mientras llegan otras, puede aceptarse un total mayor.
 
-Este resultado caracteriza un pool ocupado por esperas. En hashes, además
-limita el pool de dos procesos; en descargas también influyen las conexiones
-HTTP, la red y el servidor remoto. No se midió aquí la saturación de todos los
-recursos posibles.
 
-## Reproducción y límites de interpretación
+El rendimiento se estabiliza mientras crece la latencia. Más solicitudes no
+agregan workers. CPU, conexiones HTTP y red impondrían límites distintos en
+otras cargas; este experimento caracteriza esperas.
 
-Ejecutar `python -m benchmarks.medir` desde la raíz con requirements instalados.
-El comando tarda del orden de decenas de segundos y guarda JSON nuevo. El
-informe debe actualizarse si se reemplazan esas muestras.
+## Reproducción y límites
 
-Tres repeticiones en I/O y CPU son una muestra pequeña. El orden es fijo, hay
-variación de planificación y no se controla la carga ajena del equipo. Para
-conclusiones más generales se necesitan más repeticiones y cargas distintas.
-No se usaron respuestas HTTP simuladas en estas mediciones: las simulaciones
-con `MockTransport` están únicamente en las pruebas unitarias.
+Ejecutar python -m benchmarks.medir desde la raíz con requirements instalados.
+Arranca y cierra servidores temporales, guarda JSON y regenera este informe y
+las tablas del README. Para regenerar solo textos: python -m benchmarks.informe.
+
+Tres repeticiones son pocas; el orden es fijo y puede variar la carga del equipo.
+No se extrapolan percentiles de producción. Las pruebas unitarias usan
+MockTransport; estas mediciones usan HTTP real y conservan muestras en JSON.

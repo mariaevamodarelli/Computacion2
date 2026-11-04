@@ -8,7 +8,7 @@ from time import perf_counter
 
 import httpx
 
-from app.models import Estado, Solicitud, Tarea, ahora, Hashear
+from app.models import Estado, Solicitud, Tarea, ahora
 from app.tasks import ejecutar
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,6 @@ class Gestor:
         previos = sorted(self.directorio_estado.glob('estado_*.json'))
         if previos:
             logger.warning('Hay un volcado previo: %s (no se restaura)', previos[-1])
-        self.compartido = get_context('spawn').Manager()
         self.client = httpx.AsyncClient(
             timeout=15,
             follow_redirects=True,
@@ -46,11 +45,22 @@ class Gestor:
         self.executor = ProcessPoolExecutor(
             max_workers=self.procesos, mp_context=get_context('spawn')
         )
-        self.workers = [
-            asyncio.create_task(self.worker(), name=f'worker-{n}')
-            for n in range(self.cantidad_workers)
-        ]
         self.aceptando = True
+        self.workers = [self.crear_worker(n) for n in range(self.cantidad_workers)]
+
+    def crear_worker(self, numero):
+        worker = asyncio.create_task(self.worker(), name=f'worker-{numero}')
+        worker.add_done_callback(lambda finalizada: self.supervisar(numero, finalizada))
+        return worker
+
+    def supervisar(self, numero, worker):
+        if not worker.cancelled():
+            error = worker.exception()
+        else:
+            error = 'cancelación inesperada'
+        if self.aceptando:
+            logger.error('Worker %s terminó: %s; se reemplaza', numero, error)
+            self.workers[numero] = self.crear_worker(numero)
 
     def encolar(self, solicitud: Solicitud) -> Tarea:
         tarea = Tarea(tipo=solicitud.tipo, timeout=solicitud.timeout)
@@ -88,10 +98,8 @@ class Gestor:
             tarea.estado = Estado.EJECUTANDO
             tarea.iniciada = ahora()
             try:
-                detener = (self.compartido.Event()
-                           if isinstance(solicitud, Hashear) else None)
                 activa = asyncio.create_task(ejecutar(
-                    solicitud, self.client, self.executor, detener
+                    solicitud, self.client, self.executor
                 ))
                 self.activas[identificador] = activa
                 try:
@@ -104,6 +112,8 @@ class Gestor:
                     tarea.error = f'Timeout de {solicitud.timeout} segundos'
                 except asyncio.CancelledError:
                     tarea.estado = Estado.CANCELADA
+                    if asyncio.current_task().cancelling():
+                        raise
             except Exception as exc:
                 logger.exception('Falló la tarea %s', identificador)
                 tarea.estado = Estado.FALLIDA
@@ -127,14 +137,29 @@ class Gestor:
             for activa in list(self.activas.values()):
                 if not activa.cancelling():
                     activa.cancel()
-            await self.cola.join()
+            if self.activas:
+                _, pendientes = await asyncio.wait(
+                    list(self.activas.values()), timeout=2
+                )
+                if pendientes:
+                    logger.error('Se agotaron los 2 segundos de limpieza')
         for worker in self.workers:
             worker.cancel()
-        await asyncio.gather(*self.workers, return_exceptions=True)
-        await self.client.aclose()
-        await asyncio.to_thread(self.executor.shutdown, wait=True, cancel_futures=True)
-        await asyncio.to_thread(self.compartido.shutdown)
+        await asyncio.wait(self.workers, timeout=2)
+        # Guardar antes de cerrar recursos: una limpieza problemática no debe
+        # impedir registrar los estados terminales de las tareas.
+        for tarea in self.tareas.values():
+            if tarea.estado in (Estado.PENDIENTE, Estado.EJECUTANDO):
+                tarea.estado = Estado.CANCELADA
+                tarea.terminada = ahora()
+                tarea.error = 'Interrumpida durante el apagado'
         await asyncio.to_thread(self.volcar)
+        try:
+            await asyncio.wait_for(self.client.aclose(), timeout=2)
+        finally:
+            # Los únicos trabajos CPU pendientes son bloques acotados. No se
+            # vuelve a esperar indefinidamente por el cálculo completo.
+            self.executor.shutdown(wait=False, cancel_futures=True)
 
     def volcar(self):
         nombre = f"estado_{ahora().strftime('%Y%m%dT%H%M%S_%fZ')}.json"

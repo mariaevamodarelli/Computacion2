@@ -174,7 +174,7 @@ async def principal():
              'configuracion': {'workers': 4, 'procesos_cpu': 2, 'capacidad_cola': 100,
                                'descargas': 20, 'fixture_demora_s': .1,
                                'fixture_bytes': 1024, 'iteraciones_hash': 3_000_000,
-                               'espera_pool_s': .15}}
+                               'espera_pool_s': .15, 'hash_bloque_iteraciones': 50_000}}
     with servidor() as (base, marcador):
         async with httpx.AsyncClient(base_url=base, timeout=60,
                                      limits=httpx.Limits(max_connections=150),
@@ -194,7 +194,9 @@ async def principal():
     destino = Path('mediciones/resultados.json')
     destino.parent.mkdir(exist_ok=True)
     destino.write_text(json.dumps(datos, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-    print(f'Resultados guardados: {destino}', flush=True)
+    from benchmarks.informe import generar
+    generar()
+    print(f'Resultados e informe actualizados: {destino}', flush=True)
 
 
 if __name__ == '__main__':

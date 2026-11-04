@@ -7,14 +7,15 @@ import httpx
 from app.models import Descargar, Esperar, Hashear, Solicitud
 
 
-def hash_iterado(texto: str, iteraciones: int, detener=None) -> str:
-    """Función síncrona de nivel de módulo: se puede enviar a otro proceso."""
-    valor = texto.encode('utf-8')
-    for numero in range(iteraciones):
-        if numero % 4096 == 0 and detener is not None and detener.is_set():
-            return None
+def hash_bloque(valor: bytes, iteraciones: int) -> bytes:
+    for _ in range(iteraciones):
         valor = hashlib.sha256(valor).digest()
-    return valor.hex()
+    return valor
+
+
+def hash_iterado(texto: str, iteraciones: int) -> str:
+    """Versión síncrona para el experimento que bloquea el event loop."""
+    return hash_bloque(texto.encode('utf-8'), iteraciones).hex()
 
 
 async def descargar_url(client: httpx.AsyncClient, url: str) -> dict:
@@ -42,7 +43,7 @@ async def descargar_url(client: httpx.AsyncClient, url: str) -> dict:
         }
 
 
-async def ejecutar(solicitud: Solicitud, client: httpx.AsyncClient, executor, detener=None):
+async def ejecutar(solicitud: Solicitud, client: httpx.AsyncClient, executor):
     if isinstance(solicitud, Descargar):
         async with asyncio.TaskGroup() as grupo:
             descargas = [
@@ -52,18 +53,19 @@ async def ejecutar(solicitud: Solicitud, client: httpx.AsyncClient, executor, de
         return [descarga.result() for descarga in descargas]
     if isinstance(solicitud, Hashear):
         loop = asyncio.get_running_loop()
-        futuro = loop.run_in_executor(
-            executor, hash_iterado, solicitud.texto, solicitud.iteraciones, detener
-        )
-        try:
-            valor = await asyncio.shield(futuro)
-        except asyncio.CancelledError:
-            if detener is not None:
-                detener.set()
-            # Cancelar el await no detiene un proceso. Esperamos su salida
-            # cooperativa antes de liberar el worker y el evento compartido.
-            await asyncio.shield(futuro)
-            raise
+        valor = solicitud.texto.encode('utf-8')
+        restantes = solicitud.iteraciones
+        while restantes:
+            cantidad = min(restantes, 50_000)
+            futuro = loop.run_in_executor(executor, hash_bloque, valor, cantidad)
+            try:
+                valor = await asyncio.shield(futuro)
+            except asyncio.CancelledError:
+                # No se envían nuevos bloques; se espera únicamente el actual.
+                await asyncio.shield(futuro)
+                raise
+            restantes -= cantidad
+        valor = valor.hex()
         return {'hash': valor, 'iteraciones': solicitud.iteraciones}
     if isinstance(solicitud, Esperar):
         await asyncio.sleep(solicitud.segundos)

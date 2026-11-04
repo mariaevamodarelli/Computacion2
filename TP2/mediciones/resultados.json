@@ -1,5 +1,5 @@
 {
-  "fecha_utc": "2026-11-03T23:15:05.027653+00:00",
+  "fecha_utc": "2026-11-04T02:41:58.743087+00:00",
   "entorno": {
     "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
     "plataforma": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
@@ -16,37 +16,38 @@
     "fixture_demora_s": 0.1,
     "fixture_bytes": 1024,
     "iteraciones_hash": 3000000,
-    "espera_pool_s": 0.15
+    "espera_pool_s": 0.15,
+    "hash_bloque_iteraciones": 50000
   },
   "io": [
     {
-      "secuencial_s": 2.0651134770014323,
-      "concurrente_s": 0.12035775199183263,
-      "speedup": 17.158126026993003
+      "secuencial_s": 2.060122044000309,
+      "concurrente_s": 0.11826845200266689,
+      "speedup": 17.4190327945939
     },
     {
-      "secuencial_s": 2.0672178420063574,
-      "concurrente_s": 0.12330634600948542,
-      "speedup": 16.764894175416853
+      "secuencial_s": 2.0614068770082667,
+      "concurrente_s": 0.12658822399680503,
+      "speedup": 16.284349459395962
     },
     {
-      "secuencial_s": 2.070023410982685,
-      "concurrente_s": 0.127107104024617,
-      "speedup": 16.28566260609463
+      "secuencial_s": 2.066714058018988,
+      "concurrente_s": 0.12299085000995547,
+      "speedup": 16.803803354897525
     }
   ],
   "cpu_executor": [
     {
-      "latencia_get_s": 0.00132825699984096,
-      "duracion_hash_s": 0.7662025690078735
+      "latencia_get_s": 0.001466694986447692,
+      "duracion_hash_s": 0.8071505799889565
     },
     {
-      "latencia_get_s": 0.0009446290205232799,
-      "duracion_hash_s": 0.7447285619855393
+      "latencia_get_s": 0.0009529169765301049,
+      "duracion_hash_s": 0.7383105570042972
     },
     {
-      "latencia_get_s": 0.0009957530128303915,
-      "duracion_hash_s": 0.7546188569976948
+      "latencia_get_s": 0.000965971004916355,
+      "duracion_hash_s": 0.7122948309988715
     }
   ],
   "pool": [
@@ -54,78 +55,78 @@
       "enviadas": 1,
       "aceptadas": 1,
       "rechazadas": 0,
-      "lote_s": 0.1613107050070539,
-      "latencia_mediana_s": 0.15106,
-      "latencia_p95_s": 0.15106,
-      "tareas_por_s": 6.19921659852811
+      "lote_s": 0.15856475799228065,
+      "latencia_mediana_s": 0.150624,
+      "latencia_p95_s": 0.150624,
+      "tareas_por_s": 6.3065716030587495
     },
     {
       "enviadas": 4,
       "aceptadas": 4,
       "rechazadas": 0,
-      "lote_s": 0.16437295099603944,
-      "latencia_mediana_s": 0.1522885,
-      "latencia_p95_s": 0.152372,
-      "tareas_por_s": 24.334904105337746
+      "lote_s": 0.15825607601436786,
+      "latencia_mediana_s": 0.150975,
+      "latencia_p95_s": 0.151082,
+      "tareas_por_s": 25.275490842050484
     },
     {
       "enviadas": 8,
       "aceptadas": 8,
       "rechazadas": 0,
-      "lote_s": 0.3152210650150664,
-      "latencia_mediana_s": 0.22426000000000001,
-      "latencia_p95_s": 0.298525,
-      "tareas_por_s": 25.379014564326877
+      "lote_s": 0.31184529498568736,
+      "latencia_mediana_s": 0.224975,
+      "latencia_p95_s": 0.298927,
+      "tareas_por_s": 25.653746035729583
     },
     {
       "enviadas": 16,
       "aceptadas": 16,
       "rechazadas": 0,
-      "lote_s": 0.6132717360160314,
-      "latencia_mediana_s": 0.371688,
-      "latencia_p95_s": 0.59385,
-      "tareas_por_s": 26.089576708589338
+      "lote_s": 0.6236534779891372,
+      "latencia_mediana_s": 0.37222999999999995,
+      "latencia_p95_s": 0.593638,
+      "tareas_por_s": 25.655272622850166
     },
     {
       "enviadas": 32,
       "aceptadas": 32,
       "rechazadas": 0,
-      "lote_s": 1.233935833995929,
-      "latencia_mediana_s": 0.6643605,
-      "latencia_p95_s": 1.179668,
-      "tareas_por_s": 25.933277175663555
+      "lote_s": 1.2329101280192845,
+      "latencia_mediana_s": 0.6628590000000001,
+      "latencia_p95_s": 1.177568,
+      "tareas_por_s": 25.95485207945301
     },
     {
       "enviadas": 64,
       "aceptadas": 64,
       "rechazadas": 0,
-      "lote_s": 2.4444844239915255,
-      "latencia_mediana_s": 1.251436,
-      "latencia_p95_s": 2.352241,
-      "tareas_por_s": 26.181389978135478
+      "lote_s": 2.4361038579954766,
+      "latencia_mediana_s": 1.2489325,
+      "latencia_p95_s": 2.346331,
+      "tareas_por_s": 26.271457922431004
     },
     {
       "enviadas": 128,
       "aceptadas": 104,
       "rechazadas": 24,
-      "lote_s": 3.9549700719944667,
-      "latencia_mediana_s": 1.9981400000000002,
-      "latencia_p95_s": 3.696943,
-      "tareas_por_s": 26.296027051237193
+      "lote_s": 3.959705693006981,
+      "latencia_mediana_s": 1.997867,
+      "latencia_p95_s": 3.694249,
+      "tareas_por_s": 26.264578244708613
     }
   ],
   "cpu_directa": [
     {
-      "latencia_get_s": 0.7089413020003121,
-      "duracion_hash_s": 0.7095819500100333
+      "latencia_get_s": 0.6327579630014952,
+      "duracion_hash_s": 0.6313890830206219
     },
     {
-      "latencia_get_s": 0.7106014379824046,
-      "duracion_hash_s": 0.7119531049975194
+      "latencia_get_s": 0.647735291015124,
+      "duracion_hash_s": 0.6465834699920379
     },
     {
-      "latencia_get_s": 0.7134817840124015,
-      "duracion_hash_s": 0.7141536199778784
+      "latencia_get_s": 0.6339884170156438,
+      "duracion_hash_s": 0.6326436820090748
     }
   ]
 }
