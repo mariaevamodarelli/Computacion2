@@ -1,0 +1,131 @@
+{
+  "fecha_utc": "2026-11-03T23:15:05.027653+00:00",
+  "entorno": {
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "plataforma": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+    "cpus_visibles": 16,
+    "fastapi": "0.162.0",
+    "httpx": "0.28.1",
+    "pydantic": "2.14.2"
+  },
+  "configuracion": {
+    "workers": 4,
+    "procesos_cpu": 2,
+    "capacidad_cola": 100,
+    "descargas": 20,
+    "fixture_demora_s": 0.1,
+    "fixture_bytes": 1024,
+    "iteraciones_hash": 3000000,
+    "espera_pool_s": 0.15
+  },
+  "io": [
+    {
+      "secuencial_s": 2.0651134770014323,
+      "concurrente_s": 0.12035775199183263,
+      "speedup": 17.158126026993003
+    },
+    {
+      "secuencial_s": 2.0672178420063574,
+      "concurrente_s": 0.12330634600948542,
+      "speedup": 16.764894175416853
+    },
+    {
+      "secuencial_s": 2.070023410982685,
+      "concurrente_s": 0.127107104024617,
+      "speedup": 16.28566260609463
+    }
+  ],
+  "cpu_executor": [
+    {
+      "latencia_get_s": 0.00132825699984096,
+      "duracion_hash_s": 0.7662025690078735
+    },
+    {
+      "latencia_get_s": 0.0009446290205232799,
+      "duracion_hash_s": 0.7447285619855393
+    },
+    {
+      "latencia_get_s": 0.0009957530128303915,
+      "duracion_hash_s": 0.7546188569976948
+    }
+  ],
+  "pool": [
+    {
+      "enviadas": 1,
+      "aceptadas": 1,
+      "rechazadas": 0,
+      "lote_s": 0.1613107050070539,
+      "latencia_mediana_s": 0.15106,
+      "latencia_p95_s": 0.15106,
+      "tareas_por_s": 6.19921659852811
+    },
+    {
+      "enviadas": 4,
+      "aceptadas": 4,
+      "rechazadas": 0,
+      "lote_s": 0.16437295099603944,
+      "latencia_mediana_s": 0.1522885,
+      "latencia_p95_s": 0.152372,
+      "tareas_por_s": 24.334904105337746
+    },
+    {
+      "enviadas": 8,
+      "aceptadas": 8,
+      "rechazadas": 0,
+      "lote_s": 0.3152210650150664,
+      "latencia_mediana_s": 0.22426000000000001,
+      "latencia_p95_s": 0.298525,
+      "tareas_por_s": 25.379014564326877
+    },
+    {
+      "enviadas": 16,
+      "aceptadas": 16,
+      "rechazadas": 0,
+      "lote_s": 0.6132717360160314,
+      "latencia_mediana_s": 0.371688,
+      "latencia_p95_s": 0.59385,
+      "tareas_por_s": 26.089576708589338
+    },
+    {
+      "enviadas": 32,
+      "aceptadas": 32,
+      "rechazadas": 0,
+      "lote_s": 1.233935833995929,
+      "latencia_mediana_s": 0.6643605,
+      "latencia_p95_s": 1.179668,
+      "tareas_por_s": 25.933277175663555
+    },
+    {
+      "enviadas": 64,
+      "aceptadas": 64,
+      "rechazadas": 0,
+      "lote_s": 2.4444844239915255,
+      "latencia_mediana_s": 1.251436,
+      "latencia_p95_s": 2.352241,
+      "tareas_por_s": 26.181389978135478
+    },
+    {
+      "enviadas": 128,
+      "aceptadas": 104,
+      "rechazadas": 24,
+      "lote_s": 3.9549700719944667,
+      "latencia_mediana_s": 1.9981400000000002,
+      "latencia_p95_s": 3.696943,
+      "tareas_por_s": 26.296027051237193
+    }
+  ],
+  "cpu_directa": [
+    {
+      "latencia_get_s": 0.7089413020003121,
+      "duracion_hash_s": 0.7095819500100333
+    },
+    {
+      "latencia_get_s": 0.7106014379824046,
+      "duracion_hash_s": 0.7119531049975194
+    },
+    {
+      "latencia_get_s": 0.7134817840124015,
+      "duracion_hash_s": 0.7141536199778784
+    }
+  ]
+}

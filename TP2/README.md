@@ -1,8 +1,8 @@
 # TP2 — Plataforma de tareas distribuidas
 
-Segundo avance de Computación II: API HTTP con una cola en memoria, workers
-asíncronos y tres tipos de tarea reales. **Faltan las mediciones y el informe final para completar la
-consigna.**
+Tercer avance de Computación II: API HTTP con una cola en memoria, workers
+asíncronos, cancelación, timeouts, volcado JSON y tres experimentos reproducibles.
+El informe técnico incluye resultados de una ejecución local controlada.
 
 ## Ejecutar
 
@@ -71,7 +71,7 @@ procesos calculan hashes; `CAPACIDAD_COLA`, cuántas tareas esperan. Los valores
 por defecto son 4, 2 y 100. Cada tarea de descarga acepta hasta 20 URLs, y el
 cliente HTTP compartido limita las conexiones a 40.
 
-## Decisiones de este avance
+## Decisiones de diseño
 
 - `asyncio.Queue` permite esperar trabajo con `await` sin bloquear el event
   loop. `queue.Queue.get()` es bloqueante y está pensado para threads.
@@ -92,7 +92,7 @@ cliente HTTP compartido limita las conexiones a 40.
 - El promedio de estadísticas contempla tareas terminadas, tanto completadas
   como fallidas, y mide ejecución, sin contar espera en la cola.
 
-## Cancelación, timeouts y apagado (segundo avance)
+## Cancelación, timeouts y apagado
 
 Cada POST acepta `timeout` en segundos (por defecto 30). El límite cuenta desde
 que comienza la ejecución, sin incluir la espera en la cola. Si vence, la tarea
@@ -127,12 +127,102 @@ Se escribe `datos/estado_<timestamp>.json` mediante archivo temporal y rename.
 Compose monta esa carpeta en el host para conservar los volcados. Al arrancar
 se informa por log si hay un volcado previo; no se restaura ni reejecuta.
 
-## Pendiente para el siguiente avance
+## Mediciones reproducibles
 
-1. Las tres mediciones reales: descargas secuenciales/concurrentes, latencia
-   de la API con/sin executor y saturación del pool.
-2. Informe final: conectar con las clases y completar conclusiones personales.
-   Esos párrafos deben reflejar la experiencia del estudiante.
+Desde la raíz del proyecto, con las dependencias instaladas:
+
+```sh
+python -m benchmarks.medir
+```
+
+También se puede ejecutar dentro de Docker, sin levantar la API normal:
+
+```sh
+mkdir -p mediciones
+docker compose build
+docker compose run --rm --no-deps -v "$PWD/mediciones:/app/mediciones" api python -m benchmarks.medir
+```
+
+El comando inicia y cierra servidores temporales en puertos locales libres;
+no usa el servicio de puerto 8000 ni sitios de Internet. Guarda muestras y
+metadatos en `mediciones/resultados.json`. La variante que bloquea el event loop
+existe solo en `benchmarks/servidor.py`; el arranque normal con `app.main:app`
+siempre utiliza el executor. Los resultados detallados y la interpretación
+están en [mediciones/INFORME.md](mediciones/INFORME.md).
+
+Los datos incluidos se obtuvieron ejecutando Python en este entorno de trabajo,
+no dentro de Docker ni en la terminal del estudiante. Son mediciones reales de
+HTTP local con una demora controlada; no describen la velocidad de Internet.
+Si se repite el experimento en otra máquina, hay que actualizar resultados e
+interpretación juntos: el JSON se sobrescribe, el texto del informe no.
+
+### Resultados incluidos
+
+Configuración: 4 workers, 2 procesos CPU y cola de 100. HTTP local real;
+respuestas de 1024 bytes con 100 ms de demora controlada. Medianas de tres
+repeticiones para I/O y CPU; una muestra por tamaño de lote para el pool.
+
+| Experimento | Resultado |
+|---|---|
+| 20 descargas secuenciales | 2.0672 s |
+| 20 descargas concurrentes | 0.1233 s |
+| Speedup (cociente de medianas) | 16.76× |
+| GET durante hash sin executor | 710.601 ms |
+| GET durante hash con executor | 0.996 ms |
+
+El hash usa 3.000.000 iteraciones de SHA-256. El executor mantiene disponible
+el event loop; el beneficio medido es la respuesta de la API, no acelerar el
+hash aislado. En I/O, las esperas de red se superponen.
+
+| Tareas enviadas | Tiempo de lote (s) | Latencia p95 (s) | Rechazadas |
+|---:|---:|---:|---:|
+| 1 | 0.161 | 0.151 | 0 |
+| 4 | 0.164 | 0.152 | 0 |
+| 8 | 0.315 | 0.299 | 0 |
+| 16 | 0.613 | 0.594 | 0 |
+| 32 | 1.234 | 1.180 | 0 |
+| 64 | 2.444 | 2.352 | 0 |
+| 128 | 3.955 | 3.697 | 24 |
+
+Las tareas de este experimento esperan 150 ms. Por encima de cuatro tareas
+simultáneas aparece cola; el rendimiento se aproxima a `4 / 0,15 ≈ 26,67`
+tareas/s y la latencia crece. El lote de 128 llena la capacidad instantánea
+de 4 activas + 100 pendientes. Este techo corresponde a esperas, no mide el
+máximo de CPU o de red. El informe vinculado conserva cada muestra y explica
+la sincronización del experimento con y sin executor.
+
+## Conceptos de la materia aplicados
+
+- **Clases 13–14, sockets y servidores concurrentes:** Uvicorn atiende conexiones
+  TCP y FastAPI expone las operaciones HTTP. En las mediciones, cliente y
+  servidor son procesos distintos comunicados por TCP de loopback.
+- **Clase 17, multiplexación:** el event loop puede esperar múltiples sockets
+  sin asignar un thread a cada descarga. El mecanismo concreto depende del
+  sistema operativo; no se invoca `select` manualmente en la aplicación.
+- **Clase 18, corrutinas y event loop:** los `await` de HTTPX y `asyncio.sleep`
+  ceden el control. Ejecutar el bucle de hashes en ese hilo impide atender
+  otras solicitudes, como muestra el experimento de latencia.
+- **Clase 19, HTTP y FastAPI:** Pydantic valida las solicitudes y el POST
+  devuelve `202 Accepted`. El cliente consulta luego el recurso por su ID.
+- **Clases 20–21, asyncio en red y avanzado:** `asyncio.Queue` implementa
+  productor–consumidor; `TaskGroup` administra las descargas hijas;
+  `wait_for` combina límite temporal con cancelación y limpieza.
+- **Clase 22, concurrent.futures:** `ProcessPoolExecutor` aísla el cálculo
+  intensivo y `run_in_executor` lo integra con el event loop. El evento
+  compartido permite la detención cooperativa.
+- **Bloque 0, context managers:** `lifespan`, `async with client.stream(...)`
+  y `try/finally` definen cuándo abrir y cerrar recursos.
+
+No hace falta un lock para registrar una tarea porque no hay `await` entre la
+inserción en la cola y su registro. Esto no vuelve atómicas todas las funciones
+async: cada `await` permite que otra corrutina avance. El estado de tareas se
+modifica en el hilo del event loop; los procesos solo calculan y consultan el
+evento compartido.
+
+Con 10.000 solicitudes de golpe, una vez ocupados los workers y los 100 lugares
+de la cola, el POST responde `503`. Eso evita una cola ilimitada, pero no limita
+el historial: las tareas terminadas siguen ocupando memoria. El listado y las
+estadísticas recorren ese historial, lo cual también aumenta su costo.
 
 ## Limitaciones actuales
 
@@ -155,4 +245,5 @@ Las pruebas cubren encolado inmediato, concurrencia, recuperación tras errores,
 cola llena, descargas simuladas, hash en proceso real, cancelación pendiente y
 en ejecución, cancelación y timeout de CPU, cierre de streaming, timeout de
 espera, apagado con cancelación y volcado JSON, y detección del volcado previo.
-No reemplazan las mediciones obligatorias del informe.
+Las 11 pruebas pasaron en esta copia. La configuración de Compose se validó;
+no se ejecutó la imagen Docker por falta de acceso al daemon en este entorno.
