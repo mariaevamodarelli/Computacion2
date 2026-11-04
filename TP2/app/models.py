@@ -11,20 +11,25 @@ class Estado(StrEnum):
     EJECUTANDO = 'ejecutando'
     COMPLETADA = 'completada'
     FALLIDA = 'fallida'
+    CANCELADA = 'cancelada'
 
 
-class Descargar(BaseModel):
+class Opciones(BaseModel):
+    timeout: float = Field(default=30, gt=0, le=3600, allow_inf_nan=False)
+
+
+class Descargar(Opciones):
     tipo: Literal['descargar']
     urls: list[HttpUrl] = Field(min_length=1, max_length=20)
 
 
-class Hashear(BaseModel):
+class Hashear(Opciones):
     tipo: Literal['hashear']
     texto: str = Field(max_length=100_000)
     iteraciones: int = Field(ge=1, le=10_000_000)
 
 
-class Esperar(BaseModel):
+class Esperar(Opciones):
     tipo: Literal['esperar']
     segundos: float = Field(ge=0, le=300, allow_inf_nan=False)
 
@@ -40,6 +45,7 @@ class Tarea(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     tipo: str
     estado: Estado = Estado.PENDIENTE
+    timeout: float = 30
     creada: datetime = Field(default_factory=ahora)
     iniciada: datetime | None = None
     terminada: datetime | None = None

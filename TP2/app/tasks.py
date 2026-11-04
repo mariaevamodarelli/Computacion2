@@ -7,10 +7,12 @@ import httpx
 from app.models import Descargar, Esperar, Hashear, Solicitud
 
 
-def hash_iterado(texto: str, iteraciones: int) -> str:
+def hash_iterado(texto: str, iteraciones: int, detener=None) -> str:
     """Función síncrona de nivel de módulo: se puede enviar a otro proceso."""
     valor = texto.encode('utf-8')
-    for _ in range(iteraciones):
+    for numero in range(iteraciones):
+        if numero % 4096 == 0 and detener is not None and detener.is_set():
+            return None
         valor = hashlib.sha256(valor).digest()
     return valor.hex()
 
@@ -40,16 +42,28 @@ async def descargar_url(client: httpx.AsyncClient, url: str) -> dict:
         }
 
 
-async def ejecutar(solicitud: Solicitud, client: httpx.AsyncClient, executor):
+async def ejecutar(solicitud: Solicitud, client: httpx.AsyncClient, executor, detener=None):
     if isinstance(solicitud, Descargar):
-        return await asyncio.gather(*(
-            descargar_url(client, str(url)) for url in solicitud.urls
-        ))
+        async with asyncio.TaskGroup() as grupo:
+            descargas = [
+                grupo.create_task(descargar_url(client, str(url)))
+                for url in solicitud.urls
+            ]
+        return [descarga.result() for descarga in descargas]
     if isinstance(solicitud, Hashear):
         loop = asyncio.get_running_loop()
-        valor = await loop.run_in_executor(
-            executor, hash_iterado, solicitud.texto, solicitud.iteraciones
+        futuro = loop.run_in_executor(
+            executor, hash_iterado, solicitud.texto, solicitud.iteraciones, detener
         )
+        try:
+            valor = await asyncio.shield(futuro)
+        except asyncio.CancelledError:
+            if detener is not None:
+                detener.set()
+            # Cancelar el await no detiene un proceso. Esperamos su salida
+            # cooperativa antes de liberar el worker y el evento compartido.
+            await asyncio.shield(futuro)
+            raise
         return {'hash': valor, 'iteraciones': solicitud.iteraciones}
     if isinstance(solicitud, Esperar):
         await asyncio.sleep(solicitud.segundos)

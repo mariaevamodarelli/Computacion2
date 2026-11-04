@@ -1,6 +1,9 @@
 import asyncio
 import hashlib
 import unittest
+import tempfile
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -13,11 +16,14 @@ from app.tasks import ejecutar
 
 class SistemaTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.gestor = Gestor(workers=2, capacidad=2, procesos=1)
+        self.temporal = tempfile.TemporaryDirectory()
+        self.gestor = Gestor(workers=2, capacidad=2, procesos=1,
+                             directorio_estado=self.temporal.name, espera_apagado=1)
         await self.gestor.iniciar()
 
     async def asyncTearDown(self):
         await self.gestor.cerrar()
+        self.temporal.cleanup()
 
     async def drenar(self):
         await asyncio.wait_for(self.gestor.cola.join(), timeout=15)
@@ -106,6 +112,102 @@ class SistemaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resultado[0]['tamano_bytes'], 3)
         self.assertEqual(resultado[0]['codigo_estado'], 200)
         self.assertIn('error simulado', resultado[1]['error'])
+
+    async def test_cancelar_pendiente_y_ejecutando_por_api(self):
+        app.state.gestor = self.gestor
+        pendiente = self.gestor.encolar(Esperar(tipo='esperar', segundos=10))
+        await self.gestor.cancelar(pendiente.id)
+        self.assertEqual(pendiente.estado, Estado.CANCELADA)
+        self.assertIsNone(pendiente.iniciada)
+        activa = self.gestor.encolar(Esperar(tipo='esperar', segundos=10))
+        await asyncio.sleep(0.01)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url='http://test'
+        ) as client:
+            respuesta = await client.delete('/tareas/' + activa.id)
+            self.assertEqual(respuesta.json()['estado'], 'cancelada')
+            self.assertEqual((await client.delete('/tareas/no-existe')).status_code, 404)
+        await self.drenar()
+        self.assertFalse(self.gestor.activas)
+        self.assertTrue(all(not worker.done() for worker in self.gestor.workers))
+
+    async def test_timeout_y_worker_reutilizable(self):
+        tarea = self.gestor.encolar(Esperar(
+            tipo='esperar', segundos=10, timeout=0.03
+        ))
+        await self.drenar()
+        self.assertEqual(tarea.estado, Estado.FALLIDA)
+        self.assertIn('Timeout', tarea.error)
+        siguiente = self.gestor.encolar(Esperar(tipo='esperar', segundos=0))
+        await self.drenar()
+        self.assertEqual(siguiente.estado, Estado.COMPLETADA)
+
+    async def test_cancelar_hash_libera_proceso(self):
+        tarea = self.gestor.encolar(Hashear(
+            tipo='hashear', texto='hola', iteraciones=10_000_000
+        ))
+        await asyncio.sleep(0.15)
+        await asyncio.wait_for(self.gestor.cancelar(tarea.id), 5)
+        await self.drenar()
+        self.assertEqual(tarea.estado, Estado.CANCELADA)
+        siguiente = self.gestor.encolar(Hashear(
+            tipo='hashear', texto='hola', iteraciones=2
+        ))
+        await self.drenar()
+        self.assertEqual(siguiente.estado, Estado.COMPLETADA)
+
+    async def test_apagado_cancela_y_vuelca_json(self):
+        self.gestor.espera_apagado = 0.03
+        tarea = self.gestor.encolar(Esperar(tipo='esperar', segundos=10))
+        await asyncio.sleep(0.01)
+        await asyncio.wait_for(self.gestor.cerrar(), 5)
+        archivos = list(Path(self.temporal.name).glob('estado_*.json'))
+        self.assertEqual(len(archivos), 1)
+        datos = json.loads(archivos[0].read_text())
+        self.assertEqual(datos[0]['estado'], 'cancelada')
+        self.assertEqual(datos[0]['id'], tarea.id)
+        self.assertTrue(all(worker.done() for worker in self.gestor.workers))
+        # Reiniciar comprueba la detección del volcado y permite el tearDown.
+        with self.assertLogs('app.manager', level='WARNING') as logs:
+            await self.gestor.iniciar()
+        self.assertIn('volcado previo', ' '.join(logs.output))
+
+    async def test_timeout_hash_libera_proceso(self):
+        tarea = self.gestor.encolar(Hashear(
+            tipo='hashear', texto='hola', iteraciones=10_000_000, timeout=0.05
+        ))
+        await self.drenar()
+        self.assertEqual(tarea.estado, Estado.FALLIDA)
+        self.assertIn('Timeout', tarea.error)
+        self.assertFalse(self.gestor.activas)
+
+    async def test_cancelar_descarga_cierra_stream(self):
+        iniciada = asyncio.Event()
+        cerrada = asyncio.Event()
+
+        class Flujo(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                iniciada.set()
+                await asyncio.sleep(10)
+                yield b'datos'
+
+            async def aclose(self):
+                cerrada.set()
+
+        async def responder(request):
+            return httpx.Response(200, stream=Flujo())
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(responder)
+        ) as client:
+            tarea = asyncio.create_task(ejecutar(Descargar(
+                tipo='descargar', urls=['https://test.local/archivo']
+            ), client, self.gestor.executor))
+            await asyncio.wait_for(iniciada.wait(), 2)
+            tarea.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await tarea
+            self.assertTrue(cerrada.is_set())
 
 
 if __name__ == '__main__':

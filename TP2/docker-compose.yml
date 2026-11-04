@@ -7,4 +7,8 @@ services:
       WORKERS: "4"
       CAPACIDAD_COLA: "100"
       PROCESOS_CPU: "2"
+      DIRECTORIO_ESTADO: /app/datos
+      ESPERA_APAGADO: "10"
+    volumes:
+      - ./datos:/app/datos
     stop_grace_period: 60s

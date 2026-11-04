@@ -1,7 +1,7 @@
 # TP2 — Plataforma de tareas distribuidas
 
-Primer avance de Computación II: API HTTP con una cola en memoria, workers
-asíncronos y tres tipos de tarea reales. **Este avance todavía no completa la
+Segundo avance de Computación II: API HTTP con una cola en memoria, workers
+asíncronos y tres tipos de tarea reales. **Faltan las mediciones y el informe final para completar la
 consigna.**
 
 ## Ejecutar
@@ -47,7 +47,7 @@ curl http://localhost:8000/tareas/REEMPLAZAR_POR_ID
 curl http://localhost:8000/estadisticas
 ```
 
-Estados implementados: `pendiente`, `ejecutando`, `completada` y `fallida`.
+Estados implementados: `pendiente`, `ejecutando`, `completada`, `fallida` y `cancelada`.
 Un identificador desconocido devuelve `404`; los parámetros inválidos, `422`;
 una cola llena, `503`. Cada descarga devuelve su propio error de red si lo hay;
 la tarea contenedora puede quedar completada con errores individuales. Los
@@ -78,8 +78,8 @@ cliente HTTP compartido limita las conexiones a 40.
 - El POST valida y encola con `put_nowait`: si no hay espacio, informa el error
   en vez de quedarse esperando. Registrar la tarea no contiene ningún `await`;
   el worker no puede consumirla antes de que se registre.
-- Los workers son corrutinas, no procesos. Las descargas usan `asyncio.gather`
-  para iniciar las URLs concurrentemente. Un `for` con un `await` por URL las
+- Los workers son corrutinas, no procesos. Las descargas usan `asyncio.TaskGroup`
+  para iniciar las URLs concurrentemente y esperar su limpieza si alguna falla. Un `for` con un `await` por URL las
   descargaría secuencialmente.
 - `httpx.AsyncClient` se comparte para reutilizar conexiones. Los cuerpos se
   leen por fragmentos para contar bytes sin guardar archivos completos.
@@ -92,41 +92,67 @@ cliente HTTP compartido limita las conexiones a 40.
 - El promedio de estadísticas contempla tareas terminadas, tanto completadas
   como fallidas, y mide ejecución, sin contar espera en la cola.
 
-## Pendiente para los siguientes avances
+## Cancelación, timeouts y apagado (segundo avance)
 
-1. Cancelación de tareas pendientes y en ejecución, estado `cancelada` y
-   timeouts por tarea. Cancelar el await de un executor no detiene el cálculo:
-   habrá que resolver explícitamente esa limitación.
-2. Apagado con límite de tiempo y volcado `estado_<timestamp>.json`; detección
-   de un volcado previo al arrancar. Por ahora el cierre drena toda la cola,
-   cierra conexiones y termina el pool, pero puede superar el límite de Docker.
-3. Las tres mediciones reales: descargas secuenciales/concurrentes, latencia
+Cada POST acepta `timeout` en segundos (por defecto 30). El límite cuenta desde
+que comienza la ejecución, sin incluir la espera en la cola. Si vence, la tarea
+pasa a `fallida`, con el motivo en `error`.
+
+```sh
+curl -X POST http://localhost:8000/tareas \
+  -H 'Content-Type: application/json' \
+  -d '{"tipo":"esperar","segundos":20,"timeout":2}'
+
+curl -X DELETE http://localhost:8000/tareas/REEMPLAZAR_POR_ID
+```
+
+La cancelación de una tarea pendiente la marca y el worker la saltea cuando
+sale de la cola. Esa entrada ocupa espacio hasta ser consumida. La cancelación
+de una tarea en ejecución cancela su corrutina hija, conservando el worker.
+Cancelar una tarea terminada devuelve su estado sin modificarla.
+
+Las descargas usan `TaskGroup`: ante cancelación o error inesperado se esperan
+todas las corrutinas hijas. El contexto del streaming cierra la respuesta.
+Para CPU, cancelar el await no detiene el proceso: se usa un evento compartido
+mediante `multiprocessing.Manager`. El hash lo consulta cada 4096 iteraciones.
+Al cancelar o vencer el timeout, se activa el evento y se espera la salida del
+cálculo. Por eso el timeout puede excederse ligeramente durante la limpieza.
+El hash sigue usando `run_in_executor` y procesos separados.
+
+Uvicorn recibe SIGINT/SIGTERM y ejecuta el cierre del lifespan. Se dejan de
+aceptar tareas nuevas, se cancelan las pendientes y se concede hasta
+`ESPERA_APAGADO` segundos (10 por defecto) a las activas. Después se cancelan
+las restantes, se espera su limpieza y se cierran conexiones y procesos.
+Se escribe `datos/estado_<timestamp>.json` mediante archivo temporal y rename.
+Compose monta esa carpeta en el host para conservar los volcados. Al arrancar
+se informa por log si hay un volcado previo; no se restaura ni reejecuta.
+
+## Pendiente para el siguiente avance
+
+1. Las tres mediciones reales: descargas secuenciales/concurrentes, latencia
    de la API con/sin executor y saturación del pool.
-4. Informe final: conectar con las clases y completar conclusiones personales.
+2. Informe final: conectar con las clases y completar conclusiones personales.
    Esos párrafos deben reflejar la experiencia del estudiante.
 
 ## Limitaciones actuales
 
-El historial crece en memoria y se pierde al reiniciar. No hay autenticación,
-persistencia, cancelación ni timeout global por tarea. El timeout de HTTP es
-por operación de red, no un límite total de descarga. Las URLs son aportadas
-por el cliente, por lo que esta versión se debe ejecutar en un entorno local
-controlado, no exponer como servicio público. Las dependencias tienen rangos
-de versiones y aún no hay archivo de bloqueo reproducible.
+El historial crece en memoria y no se restaura al reiniciar. No hay autenticación.
+El cierre tiene un tiempo de gracia limitado, seguido por limpieza cooperativa;
+no garantiza un límite absoluto si un proceso del sistema deja de responder.
+Las URLs son aportadas por el cliente: esta versión se debe usar en un entorno
+local controlado, no como servicio público. Las dependencias tienen rangos de
+versiones y aún no hay archivo de bloqueo reproducible.
 
 ## Verificación
 
-Pruebas con la biblioteca estándar de Python (tras instalar requirements):
+Tras instalar requirements:
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-Cubren encolado inmediato, concurrencia de workers, recuperación tras un error,
-cola llena, descargas con transporte HTTP simulado y el cálculo de hash en un
-proceso real. No reemplazan las mediciones obligatorias del informe.
-
-Verificación de este avance: 5 pruebas aprobadas con Python 3.12; sintaxis de
-Python y configuración de Compose válidas. No se ejecutó la imagen Docker en
-este entorno por falta de acceso al daemon. No hay mediciones de rendimiento
-obligatorias realizadas todavía.
+Las pruebas cubren encolado inmediato, concurrencia, recuperación tras errores,
+cola llena, descargas simuladas, hash en proceso real, cancelación pendiente y
+en ejecución, cancelación y timeout de CPU, cierre de streaming, timeout de
+espera, apagado con cancelación y volcado JSON, y detección del volcado previo.
+No reemplazan las mediciones obligatorias del informe.

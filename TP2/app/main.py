@@ -20,6 +20,8 @@ async def lifespan(app: FastAPI):
         workers=entero_positivo('WORKERS', 4),
         capacidad=entero_positivo('CAPACIDAD_COLA', 100),
         procesos=entero_positivo('PROCESOS_CPU', 2),
+        directorio_estado=os.getenv('DIRECTORIO_ESTADO', 'datos'),
+        espera_apagado=entero_positivo('ESPERA_APAGADO', 10),
     )
     await gestor.iniciar()
     app.state.gestor = gestor
@@ -60,3 +62,11 @@ async def obtener_tarea(identificador: str, request: Request):
 @app.get('/estadisticas')
 async def estadisticas(request: Request):
     return request.app.state.gestor.estadisticas()
+
+
+@app.delete('/tareas/{identificador}', response_model=Tarea)
+async def cancelar_tarea(identificador: str, request: Request):
+    gestor = request.app.state.gestor
+    if identificador not in gestor.tareas:
+        raise HTTPException(404, 'Tarea inexistente')
+    return await gestor.cancelar(identificador)
